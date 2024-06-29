@@ -26,6 +26,7 @@ import android.view.ViewGroup;
 import android.view.animation.AnimationUtils;
 import android.widget.LinearLayout;
 
+import com.android.keyguard.KeyguardSecurityModel.SecurityMode;
 import com.android.internal.widget.LockPatternUtils;
 import com.android.internal.widget.LockPatternUtils.RequestThrottledException;
 import com.android.keyguard.PasswordTextView.QuickUnlockListener;
@@ -162,21 +163,6 @@ public class KeyguardPINView extends KeyguardPinBasedInputView {
                 view.setDigit(sNumbers.get(i));
             }
         }
-
-        boolean quickUnlock = (Settings.System.getIntForUser(getContext().getContentResolver(),
-                Settings.System.LOCKSCREEN_QUICK_UNLOCK_CONTROL, 0, UserHandle.USER_CURRENT) == 1);
-
-        if (quickUnlock) {
-            mPasswordEntry.setQuickUnlockListener(new QuickUnlockListener() {
-                public void onValidateQuickUnlock(String password) {
-                    if (password != null && password.length() == keyguardPinPasswordLength()) {
-                        validateQuickUnlock(mLockPatternUtils, password, userId);
-                    }
-                }
-            });
-        } else {
-            mPasswordEntry.setQuickUnlockListener(null);
-        }
     }
 
     @Override
@@ -241,45 +227,8 @@ public class KeyguardPINView extends KeyguardPinBasedInputView {
         return false;
     }
 
-    private AsyncTask<?, ?, ?> validateQuickUnlock(final LockPatternUtils utils,
-            final String password,
-            final int userId) {
-        AsyncTask<Void, Void, Boolean> task = new AsyncTask<Void, Void, Boolean>() {
-
-            @Override
-            protected Boolean doInBackground(Void... args) {
-                try {
-                    return utils.checkPassword(password, userId);
-                } catch (RequestThrottledException ex) {
-                    return false;
-                }
-            }
-
-            @Override
-            protected void onPostExecute(Boolean result) {
-                runQuickUnlock(result);
-            }
-        };
-        task.execute();
-        return task;
-    }
-
-    private void runQuickUnlock(Boolean matched) {
-        if (matched) {
-            mPasswordEntry.setEnabled(false);
-            mCallback.reportUnlockAttempt(userId, true, 0);
-            mCallback.dismiss(true, userId);
-            resetPasswordText(true, true);
-        }
-    }
-
-    private int keyguardPinPasswordLength() {
-        int pinPasswordLength = -1;
-        try {
-            pinPasswordLength = (int) mLockPatternUtils.getLockSettings().getLong("lockscreen.pin_password_length", -1, userId);
-        } catch (Exception e) {
-            // do nothing
-        }
-        return pinPasswordLength >= 4 ? pinPasswordLength : -1;
+    @Override
+    public SecurityMode getSecurityMode() {
+        return SecurityMode.PIN;
     }
 }

@@ -91,6 +91,7 @@ import android.system.OsConstants;
 import android.system.StructStat;
 import android.text.TextUtils;
 import android.util.ArraySet;
+import android.util.EventLog;
 import android.util.ExceptionUtils;
 import android.util.MathUtils;
 import android.util.Slog;
@@ -151,6 +152,7 @@ public class PackageInstallerSession extends IPackageInstallerSession.Stub {
     private static final String ATTR_SESSION_STAGE_CID = "sessionStageCid";
     private static final String ATTR_PREPARED = "prepared";
     private static final String ATTR_COMMITTED = "committed";
+    private static final String ATTR_DESTROYED = "destroyed";
     private static final String ATTR_SEALED = "sealed";
     private static final String ATTR_MULTI_PACKAGE = "multiPackage";
     private static final String ATTR_PARENT_SESSION_ID = "parentSessionId";
@@ -413,8 +415,8 @@ public class PackageInstallerSession extends IPackageInstallerSession.Stub {
             PackageSessionProvider sessionProvider, Looper looper, StagingManager stagingManager,
             int sessionId, int userId,
             String installerPackageName, int installerUid, SessionParams params, long createdMillis,
-            File stageDir, String stageCid, boolean prepared, boolean committed, boolean sealed,
-            @Nullable int[] childSessionIds, int parentSessionId, boolean isReady,
+            File stageDir, String stageCid, boolean prepared, boolean committed, boolean destroyed,
+            boolean sealed, @Nullable int[] childSessionIds, int parentSessionId, boolean isReady,
             boolean isFailed, boolean isApplied, int stagedSessionErrorCode,
             String stagedSessionErrorMessage) {
         mCallback = callback;
@@ -449,6 +451,7 @@ public class PackageInstallerSession extends IPackageInstallerSession.Stub {
 
         mPrepared = prepared;
         mCommitted = committed;
+        mDestroyed = destroyed;
         mStagedSessionReady = isReady;
         mStagedSessionFailed = isFailed;
         mStagedSessionApplied = isApplied;
@@ -556,6 +559,13 @@ public class PackageInstallerSession extends IPackageInstallerSession.Stub {
     boolean isCommitted() {
         synchronized (mLock) {
             return mCommitted;
+        }
+    }
+
+    /** {@hide} */
+    boolean isDestroyed() {
+        synchronized (mLock) {
+            return mDestroyed;
         }
     }
 
@@ -1702,6 +1712,11 @@ public class PackageInstallerSession extends IPackageInstallerSession.Stub {
                     resolveInheritedFile(baseDexMetadataFile);
                 }
                 baseApk = existingBase;
+            } else if ((params.installFlags & PackageManager.INSTALL_DONT_KILL_APP) != 0) {
+                EventLog.writeEvent(0x534e4554, "219044664");
+
+                // Installing base.apk. Make sure the app is restarted.
+                params.setDontKillApp(false);
             }
 
             // Inherit splits if not overridden
@@ -2134,6 +2149,11 @@ public class PackageInstallerSession extends IPackageInstallerSession.Stub {
     }
 
     @Override
+    public int getInstallFlags() {
+        return params.installFlags;
+    }
+
+    @Override
     public int[] getChildSessionIds() {
         final int[] childSessionIds = mChildSessionIds.copyKeys();
         if (childSessionIds != null) {
@@ -2423,7 +2443,7 @@ public class PackageInstallerSession extends IPackageInstallerSession.Stub {
      */
     void write(@NonNull XmlSerializer out, @NonNull File sessionsDir) throws IOException {
         synchronized (mLock) {
-            if (mDestroyed) {
+            if (mDestroyed && !params.isStaged) {
                 return;
             }
 
@@ -2445,6 +2465,7 @@ public class PackageInstallerSession extends IPackageInstallerSession.Stub {
             }
             writeBooleanAttribute(out, ATTR_PREPARED, isPrepared());
             writeBooleanAttribute(out, ATTR_COMMITTED, isCommitted());
+            writeBooleanAttribute(out, ATTR_DESTROYED, isDestroyed());
             writeBooleanAttribute(out, ATTR_SEALED, isSealed());
 
             writeBooleanAttribute(out, ATTR_MULTI_PACKAGE, params.isMultiPackage);
@@ -2546,6 +2567,7 @@ public class PackageInstallerSession extends IPackageInstallerSession.Stub {
         final String stageCid = readStringAttribute(in, ATTR_SESSION_STAGE_CID);
         final boolean prepared = readBooleanAttribute(in, ATTR_PREPARED, true);
         final boolean committed = readBooleanAttribute(in, ATTR_COMMITTED);
+        final boolean destroyed = readBooleanAttribute(in, ATTR_DESTROYED);
         final boolean sealed = readBooleanAttribute(in, ATTR_SEALED);
         final int parentSessionId = readIntAttribute(in, ATTR_PARENT_SESSION_ID,
                 SessionInfo.INVALID_ID);
@@ -2633,8 +2655,8 @@ public class PackageInstallerSession extends IPackageInstallerSession.Stub {
         return new PackageInstallerSession(callback, context, pm, sessionProvider,
                 installerThread, stagingManager, sessionId, userId, installerPackageName,
                 installerUid, params, createdMillis, stageDir, stageCid, prepared, committed,
-                sealed, childSessionIdsArray, parentSessionId, isReady, isFailed, isApplied,
-                stagedSessionErrorCode, stagedSessionErrorMessage);
+                destroyed, sealed, childSessionIdsArray, parentSessionId, isReady, isFailed,
+                isApplied, stagedSessionErrorCode, stagedSessionErrorMessage);
     }
 
     /**
